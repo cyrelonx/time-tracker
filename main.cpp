@@ -11,6 +11,8 @@
 #include <fstream>
 #include <filesystem>
 #include <map>
+#include <utility>
+#include <csignal>
 
 using namespace std;
 
@@ -41,14 +43,90 @@ string GetActiveProcessName()
     return "";
 }
 
-int main()
+void loadFile()
 {
-    ofstream logFile("log.txt", ios::app);
+    ifstream logFile("log.txt");
     if (!logFile.is_open())
     {
         cerr << "Error opening log.txt file!\n";
-        return 1;
+        return;
     }
+
+    string line;
+
+    while(getline(logFile, line))
+    {
+        stringstream ss(line);
+        string pName, pDuration;
+
+        getline(ss, pName, '(');
+        getline(ss, pDuration, ')');
+
+        // Remove any trailing spaces from pName
+        if (!pName.empty())
+            pName.erase(pName.find_last_not_of(" \n\r\t") + 1);
+
+        // Parse duration in m:s format
+        int minutes = 0, seconds = 0;
+        size_t colonPos = pDuration.find(':');
+
+        if (colonPos != string::npos)
+        {
+            try {
+                minutes = stoi(pDuration.substr(0, colonPos));
+                seconds = stoi(pDuration.substr(colonPos + 1));
+            } catch (...) {
+                minutes = 0;
+                seconds = 0;
+            }
+        }
+
+        long long totalSeconds = minutes * 60 + seconds;
+        processData[pName] = totalSeconds;
+    }
+
+    logFile.close();
+}
+
+void saveFile()
+{
+    ofstream logFile("log.txt");
+    if (!logFile.is_open())
+    {
+        cerr << "Error opening log.txt file!\n";
+        return;
+    }
+
+    for (auto &p : processData)
+    {
+        long long totalSeconds = p.second;
+        int minutes = totalSeconds / 60;
+        int seconds = totalSeconds % 60;
+
+        logFile << p.first << " (" << minutes << ":" << seconds << ")\n";
+        logFile.flush();
+    }
+
+    logFile.close();
+}
+
+void signalHandler(int signum)
+{
+    saveFile();
+    exit(signum);
+}
+
+int main()
+{
+    signal(SIGINT, signalHandler);
+    loadFile();
+
+    cout << "----------------------------------\n";
+    for (auto &p : processData)
+    {
+        cout << p.first << " - " << p.second << "\n";
+    }
+    cout << "----------------------------------\n";
 
     string lastProcess;
     auto startTime = chrono::steady_clock::now();
@@ -61,17 +139,10 @@ int main()
             if (lastProcess != "")
             {
                 auto endTime = chrono::steady_clock::now();
-                auto duration = chrono::duration_cast<chrono::seconds>(endTime - startTime).count();
-            
-                int minutes = duration / 60;
-                int seconds = duration % 60;
+                long long duration = chrono::duration_cast<chrono::seconds>(endTime - startTime).count();
 
                 string fileName = filesystem::path(lastProcess).filename().string();
-
-                logFile << fileName << " (" << minutes << ":" << seconds << ")\n";
-                logFile.flush();
-                
-                cout << "Closed " << fileName << " - " << minutes << ":" << seconds << "\n";
+                processData[fileName] += duration;
             }
 
             startTime = chrono::steady_clock::now();
@@ -79,9 +150,16 @@ int main()
             cout << "You're using: " << current << "\n";
             lastProcess = current;
         }
+
+        static auto lastSave = chrono::steady_clock::now();
+        auto now = chrono::steady_clock::now();
+        if (chrono::duration_cast<chrono::seconds>(now - lastSave).count() >= 20)
+        {
+            saveFile();
+            lastSave = now;
+        }
+
         Sleep(1000);
     }
-
-    logFile.close();
     return 0;
 }
