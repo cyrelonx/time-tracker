@@ -19,6 +19,23 @@ using namespace std;
 // I need to add elements to map (minutes, seconds) and values for those el.
 map<string, long long> processData;
 
+string ignoredProcesses[] =
+{
+    "explorer.exe",
+    "svchost.exe",
+    "System Idle Process",
+    "taskhostw.exe",
+    "SearchUI.exe",
+    "ShellExperienceHost.exe",
+    "RuntimeBroker.exe",
+    "Taskmgr.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "dllhost.exe",
+    "winlogon.exe",
+    "dwm.exe"
+};
+
 string GetActiveProcessName()
 {
     HWND hwnd = GetForegroundWindow(); // active window
@@ -116,6 +133,17 @@ void signalHandler(int signum)
     exit(signum);
 }
 
+bool isIgnored(const string& process)
+{
+    string fileName = filesystem::path(process).filename().string();
+    for (const auto &ignored : ignoredProcesses)
+    {
+        if (fileName == ignored)
+            return true;
+    }
+    return false;
+}
+
 int main()
 {
     signal(SIGINT, signalHandler);
@@ -134,9 +162,10 @@ int main()
     while (true)
     {
         string current = GetActiveProcessName();
+
         if (current != "" && current != lastProcess)
         {
-            if (lastProcess != "")
+            if (lastProcess != "" && !isIgnored(lastProcess))
             {
                 auto endTime = chrono::steady_clock::now();
                 long long duration = chrono::duration_cast<chrono::seconds>(endTime - startTime).count();
@@ -147,13 +176,14 @@ int main()
 
             startTime = chrono::steady_clock::now();
 
-            cout << "You're using: " << current << "\n";
+            if (!isIgnored(current))
+                cout << "You're using: " << current << "\n";
             lastProcess = current;
         }
 
         static auto lastSave = chrono::steady_clock::now();
         auto now = chrono::steady_clock::now();
-        if (chrono::duration_cast<chrono::seconds>(now - lastSave).count() >= 20)
+        if (chrono::duration_cast<chrono::seconds>(now - lastSave).count() >= 10)
         {
             saveFile();
             lastSave = now;
